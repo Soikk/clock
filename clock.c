@@ -1,7 +1,13 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <time.h>
+#ifdef _WIN32
 #include <windows.h>
+#else
+#include <sys/ioctl.h>
+#include <fcntl.h>
+#include <unistd.h>
+#endif
 
 #define PADDING 1
 #define BLOCK 219 // █
@@ -92,14 +98,30 @@ int colon[5] = { SPACE, BLOCK, SPACE, BLOCK, SPACE };
 
 
 void setConsoleSize(int width, int height){
+	#ifdef _WIN32
 	HANDLE windowHandle = GetStdHandle(STD_OUTPUT_HANDLE);
 	COORD coord = {.X = width, .Y = height};
     SMALL_RECT windowSize = {0 , 0 , width-1, height-1};
     SetConsoleScreenBufferSize(windowHandle, coord);
     SetConsoleWindowInfo(windowHandle, TRUE, &windowSize);
+    #else
+    struct winsize ws;
+    int fd;
+    /* Open the controlling terminal. */
+    fd = open("/dev/tty", O_RDWR);
+    if(fd < 0)
+        exit(1);
+    /* Get window size of terminal. */
+    if (ioctl(fd, TIOCGWINSZ, &ws) < 0)
+        exit(1);
+    //height = &ws.ws_row;
+    //width = &ws.ws_col;
+    close(fd);
+    #endif
 }
 
 void cursorVisible(int q){
+	#ifdef _WIN32
     HANDLE consoleHandle = GetStdHandle(STD_OUTPUT_HANDLE);
     CONSOLE_CURSOR_INFO info;
     info.dwSize = 25;
@@ -109,11 +131,22 @@ void cursorVisible(int q){
         info.bVisible = FALSE;
     }
     SetConsoleCursorInfo(consoleHandle, &info);
+    #else
+    if(q == 1){
+        printf("\e[?25h");
+    }else if(q == 0){
+        printf("\e[?25l");
+    }
+    #endif
 }
 
 void gotoxy(int x, int y){
+	#ifdef _WIN32
     COORD coord = {.X = x, .Y = y};
     SetConsoleCursorPosition(GetStdHandle(STD_OUTPUT_HANDLE), coord);
+    #else
+    printf("\033[%d;%dH", y, x);
+    #endif
 }
 
 void printBlock(int c){
@@ -136,7 +169,6 @@ void drawTime(struct tm *time){
 		date[c++] = time->tm_hour/10;
 	}
 
-	
 	for(int i = 0; i < 5; i++){
 		c = _colons;
 		putchar('\n');
@@ -220,9 +252,13 @@ int main(int argc, char **argv){
 		return 0;
 	}
 
+	#ifdef _WIN32
 	system("@ECHO OFF");
 	system("cls");
 	SetConsoleTitle("CLOCK");
+	#else
+	system("clear");
+	#endif
 	setConsoleSize(_width, _height);
 	time_t rawtime;
 	

@@ -268,6 +268,11 @@ int main(int argc, char **argv){
 		struct tm *curr_time = localtime(&rawtime);
 		gotoxy(0, 0);
 		drawTime(curr_time);
+		#ifdef _WIN32
+		Sleep(125);
+		#else
+		sleep(.125);
+		#endif
 	}
 
 	return 0;

@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <time.h>
+#include <string.h>
 #ifdef _WIN32
 #include <windows.h>
 #else
@@ -12,14 +13,65 @@
 #define PADDING 1
 #define BLOCK 219 // █
 #define SPACE 32 // ' '
+#define ENTER '\n'
 #define BLOCK_WIDTH 2
 #define NUM_WIDTH 3
 #define NUM_HEIGHT 5
 #define COLON_WIDTH 3
 #define COLON_HEIGHT 5
+#define FLAGS 9
 
+
+enum Bitmask {
+	SECOND, MINUTE, HOUR,
+	DAY, MONTH, YEAR,
+	AM_PM,
+	DEFAULT,
+	DEBUG,
+	TERMINATE
+};
+
+char flags[FLAGS] = "sthdmyarb";
+
+int _mask = '\x00', _default_mask = '\x3F';
 
 int _debug, _numbers, _colons, _date, _date_length, _width, _height;
+
+char daysLetters[7] = "MTWRFSU";
+
+char *days[7] = { 
+		"Monday", "Tuesday", "Wednesday", "Thursday",
+		"Friday", "Saturday", "Sunday" };
+
+char monthsLetters[12] = "JFMAMJJASOND";
+
+char *months[12] = { 
+		"January", "February", "March", "April", "May", "June",
+		"July", "August", "September", "October", "November", "December" };
+
+char usage[] = "Usage: clock.exe -[FLAGS]... -[FLAGS]...\n"
+				"<T> (time)\n"
+				"\tIf T is below 0 it will be set to 0\n"
+				"\tIf T is above 3 it will be set to 3\n"
+				"\t\t-T = 0: display nothing\n"
+				"\t\t-T = 1: display seconds\n"
+				"\t\t-T = 2: above + minutes\n"
+				"\t\t-T = 3: above + hours\n"
+				"<D> (date)\n"
+				"\tIf D is below 0 it will be set to 0\n"
+				"\tIf D is above 3 it will be set to 3\n"
+				"\t\t-D = 0: display nothing\n"
+				"\t\t-D = 1: display day\n"
+				"\t\t-D = 2: above + month\n"
+				"\t\t-D = 3: above + year\n"
+				"<B> (debug - optional)\n\n"
+				"\tB doesnt need to be set\n"
+				"\tIf B is below 0 it will be set to 0\n"
+				"\tIf B is above 1 it will be set to 1\n"
+				"\t\t-B = 0: display nothing\n"
+				"\t\t-B = 1: turn on debugging mode";
+
+int colon[5] = { SPACE, BLOCK, SPACE, BLOCK, SPACE };
 
 int numbers[10][5][3] = { 
 	{
@@ -94,8 +146,39 @@ int numbers[10][5][3] = {
 	}
 };
 
-int colon[5] = { SPACE, BLOCK, SPACE, BLOCK, SPACE };
 
+void setBit(int *bit, int n){
+	*bit |= (1 << n);
+}
+
+void clearBit(int *bit, int n){
+	*bit &= ~(1 << n);
+}
+
+void flipBit(int *bit, int n){
+	*bit ^= (1 << n);
+}
+
+int getBit(int bit, int n){
+	return (bit & (1 << n)) != 0;
+}
+
+void clearScreen(){
+	#ifdef _WIN32
+	system("cls");
+	#else
+	system("clear");
+	#endif
+}
+
+void csleep(int milliseconds){
+	#ifdef _WIN32
+	Sleep(milliseconds);
+	#else
+	float fmilliseconds = milliseconds/1000;
+	sleep(fmilliseconds);
+	#endif
+}
 
 void setConsoleSize(int width, int height){
 	#ifdef _WIN32
@@ -104,6 +187,13 @@ void setConsoleSize(int width, int height){
     SMALL_RECT windowSize = {0 , 0 , width-1, height-1};
     SetConsoleScreenBufferSize(windowHandle, coord);
     SetConsoleWindowInfo(windowHandle, TRUE, &windowSize);
+
+    CONSOLE_SCREEN_BUFFER_INFO scr;
+	GetConsoleScreenBufferInfo(windowHandle, &scr);
+	while(width != scr.dwSize.X || height != scr.dwSize.Y){
+		setConsoleSize(width, height);
+		GetConsoleScreenBufferInfo(windowHandle, &scr);
+	}
     #else
     struct winsize ws;
     int fd;
@@ -149,6 +239,11 @@ void gotoxy(int x, int y){
     #endif
 }
 
+void restoreConsoleSize(){
+	setConsoleSize(120, 30);
+	//clearScreen();
+}
+
 void printBlock(int c){
 	putchar(c);
 	putchar(c);
@@ -156,22 +251,21 @@ void printBlock(int c){
 
 void drawTime(struct tm *time){
 	int date[_numbers], c = 0;
-	if(_numbers/2 >= 1){
-		date[c++] = time->tm_sec%10;
-		date[c++] = time->tm_sec/10;
-	}
-	if(_numbers/2 >= 2){
-		date[c++] = time->tm_min%10;
-		date[c++] = time->tm_min/10;		
-	}
-	if(_numbers/2 >= 3){
-		date[c++] = time->tm_hour%10;
-		date[c++] = time->tm_hour/10;
+	if(getBit(_mask, SECOND)){ date[c++] = time->tm_sec%10; date[c++] = time->tm_sec/10; }
+	if(getBit(_mask, MINUTE)){ date[c++] = time->tm_min%10; date[c++] = time->tm_min/10; }
+	if(getBit(_mask, HOUR)){
+		if(getBit(_mask, AM_PM)){
+			date[c++] = (((time->tm_hour+11)%12+1))%10;
+			date[c++] = (((time->tm_hour+11)%12+1))/10;
+		}else{
+			date[c++] = time->tm_hour%10;
+			date[c++] = time->tm_hour/10;
+		}
 	}
 
 	for(int i = 0; i < 5; i++){
 		c = _colons;
-		putchar('\n');
+		putchar(ENTER);
 		printBlock(SPACE);
 		for(int j = 0; j < _numbers; j++){
 			for(int k = 0; k < 3; k++){
@@ -188,77 +282,111 @@ void drawTime(struct tm *time){
 		}
 	}
 
-	putchar('\n');
+	if(getBit(_mask, AM_PM)){
+		char ap = (time->tm_hour > 11)?'P':'A';
+		putchar(ap);
+		putchar('M');
+		printBlock(SPACE);
+	}
+
+	putchar(ENTER);
 	if(_date > 0){
-		putchar('\n');
+		putchar(ENTER);
 		for(int i = 0; i < _width/2 - _date_length/2 - _date_length%2; i++){
 			putchar(SPACE);
 		}
-		if(_date >= 1)
+		if(getBit(_mask, DAY)){
 			printf("%02d", time->tm_mday);
-		if(_date >= 2)
-			printf("/%02d", time->tm_mon);
-		if(_date >= 3)
-			printf("/%d", time->tm_year+1900);
+			if(getBit(_mask, MONTH) || getBit(_mask, YEAR)){
+				putchar('/');
+			}
+		}
+		if(getBit(_mask, MONTH)){
+			printf("%02d", time->tm_mon);
+			if(getBit(_mask, YEAR)){
+				putchar('/');
+			}
+		}
+		if(getBit(_mask, YEAR))
+			printf("%d", time->tm_year+1900);
 	}
 }
 
 int main(int argc, char **argv){
 
-	if(argc < 3){
-		setConsoleSize(120, 30);
-		printf("Usage: clock.exe <T> <D> <B>\n");
-		printf(	"<T> (time)\n"
-				"\tIf T is below 0 it will be set to 0\n"
-				"\tIf T is above 3 it will be set to 3\n"
-				"\t\t-T = 0: display nothing\n"
-				"\t\t-T = 1: display seconds\n"
-				"\t\t-T = 2: above + minutes\n"
-				"\t\t-T = 3: above + hours\n");
-		printf( "<D> (date)\n"
-				"\tIf D is below 0 it will be set to 0\n"
-				"\tIf D is above 3 it will be set to 3\n"
-				"\t\t-D = 0: display nothing\n"
-				"\t\t-D = 1: display day\n"
-				"\t\t-D = 2: above + month\n"
-				"\t\t-D = 3: above + year\n");
-		printf( "<B> (debug - optional)\n\n"
-				"\tB doesnt need to be set\n"
-				"\tIf B is below 0 it will be set to 0\n"
-				"\tIf B is above 1 it will be set to 1\n"
-				"\t\t-B = 0: display nothing\n"
-				"\t\t-B = 1: turn on debugging mode");
-		return 0;
-	}
-	if(argc == 4){
-		_debug = atoi(argv[3]);
+	atexit(restoreConsoleSize);
+
+	// Finds flags and sets them in the mask
+	for(int i = 1; i < argc; i++){
+		if(argv[i][0] == '-'){
+			int argSize = strlen(argv[i]);
+			char *c;
+			for(int j = 1; j < argSize; j++){
+				if(c = strchr(flags, argv[i][j])){
+					setBit(&_mask, c - flags);
+				}else{
+					printf("Invalid option '-%c'\n", argv[i][j]);
+					setBit(&_mask, TERMINATE);
+				}
+			}
+		}else{
+			printf("Unrecognized option '%s'\n", argv[i]);
+			setBit(&_mask, TERMINATE);
+		}
 	}
 
-	_numbers = atoi(argv[1])*2;
-	_colons = (_numbers/2) - 1;
-	_date = atoi(argv[2]);
-	_date_length = (_date > 0)*(_date*2 + (_date == 3)*2 + (_date-1));
-	_width = (_numbers*NUM_WIDTH + _colons*COLON_WIDTH + (_numbers/2)*PADDING + 2*PADDING)*BLOCK_WIDTH;
+	// Sets the default settings if the flag is enabled
+	if(getBit(_mask, DEFAULT)){
+		setBit(&_mask, SECOND);
+		setBit(&_mask, MINUTE);
+		setBit(&_mask, HOUR);
+		setBit(&_mask, DAY);
+		setBit(&_mask, MONTH);
+		setBit(&_mask, YEAR);
+		clearBit(&_mask, AM_PM);
+	}
+
+	// Sets the enviroment variables
+	_numbers = (getBit(_mask, SECOND) + getBit(_mask, MINUTE) + getBit(_mask, HOUR))*2;
+	_colons = ((_numbers/2) - 1)*(_numbers > 0);
+	_date = getBit(_mask, DAY) + getBit(_mask, MONTH) + getBit(_mask, YEAR);
+	_date_length = (getBit(_mask, DAY) + getBit(_mask, MONTH))*2 + getBit(_mask, YEAR)*4 + (_date - 1);
+	_width = (_numbers*NUM_WIDTH + _colons*COLON_WIDTH + (_numbers/2)*PADDING + 2*PADDING)*BLOCK_WIDTH + getBit(_mask, AM_PM)*4;
 	_height = NUM_HEIGHT + (_date > 0)*2 + 2*PADDING;
 
-	if(_debug > 0){
-		setConsoleSize(120, 30);
+	// Enables debug mode
+	if(getBit(_mask, DEBUG)){
+		restoreConsoleSize();
+		printf(	"flags: ");
+		for(int i = 0; i < FLAGS; i++){
+			if(getBit(_mask, i))
+				printf("-%c, \t", flags[i]);
+		}
+		printf(	"\n");
 		printf(	"nums: %d\n"
 				"colons: %d\n"
 				"date: %d\n"
 				"width: %d\n"
-				"height: %d\n",
-				_numbers, _colons, _date, _width, _height);
+				"height: %d\n"
+				"date length: %d\n",
+				_numbers, _colons, _date, _width, _height, _date_length);
+		setBit(&_mask, TERMINATE);
+	}
+
+	if(_numbers == 0 && _date == 0){
+		printf("\nNo clock\n");
+		setBit(&_mask, TERMINATE);
+	}
+	
+	if(getBit(_mask, TERMINATE)){
 		return 0;
 	}
 
 	#ifdef _WIN32
 	system("@ECHO OFF");
-	system("cls");
 	SetConsoleTitle("CLOCK");
-	#else
-	system("clear");
 	#endif
+	clearScreen();
 	setConsoleSize(_width, _height);
 	time_t rawtime;
 	
@@ -268,11 +396,7 @@ int main(int argc, char **argv){
 		struct tm *curr_time = localtime(&rawtime);
 		gotoxy(0, 0);
 		drawTime(curr_time);
-		#ifdef _WIN32
-		Sleep(125);
-		#else
-		sleep(.125);
-		#endif
+		csleep(125);
 	}
 
 	return 0;
